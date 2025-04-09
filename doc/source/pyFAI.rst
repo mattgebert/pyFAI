@@ -191,7 +191,7 @@ The drawback of this is the correlation introduced between two adjacent bins.
 To simplify
 calculations, this was initially done by abstracting the pixel shape
 with a bounding box that circumscribes the pixel. In an effort to better
-the quality of the results this method was dropped in favoor of a full
+the quality of the results this method was dropped in favour of a full
 pixel splitting scheme that actually uses the actual pixel geometry
 for its calculations.
 
