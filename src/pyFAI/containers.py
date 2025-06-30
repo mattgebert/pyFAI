@@ -30,22 +30,33 @@ __author__ = "Valentin Valls"
 __contact__ = "valentin.valls@esrf.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "07/01/2025"
+__date__ = "16/05/2025"
 __status__ = "development"
 
+import sys
+import copy
+import logging
+from dataclasses import fields, asdict, dataclass as _dataclass
 from collections import namedtuple
 from enum import IntEnum
 from .utils.decorators import deprecated_warning
 import numpy
 
+# Few named tuples
 PolarizationArray = namedtuple("PolarizationArray",
                                ["array", "checksum"])
 PolarizationDescription = namedtuple("PolarizationDescription",
                                      ["polarization_factor", "axis_offset"])
-
 Integrate1dtpl = namedtuple("Integrate1dtpl", "position intensity sigma signal variance normalization count std sem norm_sq", defaults=(None,) * 3)
 Integrate2dtpl = namedtuple("Integrate2dtpl", "radial azimuthal intensity sigma signal variance normalization count std sem norm_sq", defaults=(None,) * 3)
 
+# User defined dataclasses
+if sys.version_info >= (3, 10):
+    dataclass = _dataclass(slots=True)
+else:
+    dataclass = _dataclass
+
+logger = logging.getLogger(__name__)
 
 class ErrorModel(IntEnum):
     NO = 0
@@ -82,10 +93,45 @@ class ErrorModel(IntEnum):
         return self.name.lower()
 
 
-class IntegrateResult(tuple):
+class _CopyableTuple(tuple):
+    "Abstract class that can be copied using the copy module"
+    COPYABLE_ATTR = tuple()  # list of copyable attributes
+
+    def __copy__(self):
+        "Helper function for copy.copy()"
+        other = self.__class__(*self)
+        for attr in self.COPYABLE_ATTR:
+            setattr(other, attr, getattr(self, attr))
+        return other
+
+    def __deepcopy__(self, memo=None):
+        "Helper function for copy.deepcopy()"
+        if memo is None:
+            memo = {}
+        args = []
+        for i in self:
+            cpy = copy.deepcopy(i, memo)
+            memo[id(i)] = cpy
+            args.append(cpy)
+        other = self.__class__(*args)
+        for attr in self.COPYABLE_ATTR:
+            org = getattr(self, attr)
+            cpy = copy.deepcopy(org, memo)
+            memo[id(org)] = cpy
+            setattr(other, attr, cpy)
+        return other
+
+
+class IntegrateResult(_CopyableTuple):
     """
     Class defining shared information between Integrate1dResult and Integrate2dResult.
     """
+    COPYABLE_ATTR = {"_sum_signal", "_sum_variance", "_sum_normalization", "_sum_normalization2",
+                     "_count", "_unit", "_has_mask_applied", "_has_dark_correction",
+                     "_has_flat_correction", "_has_solidangle_correction", "_normalization_factor",
+                     "_polarization_factor", "_metadata", "_npt_azim", "_percentile", "_method",
+                     "_method_called", "_compute_engine", "_error_model", "_std", "_sem",
+                     "_poni", "_weighted_average"}
 
     def __init__(self):
         self._sum_signal = None  # sum of signal
@@ -387,8 +433,7 @@ class IntegrateResult(tuple):
 
     @property
     def poni(self):
-        """content of the PONI-file
-        """
+        "content of the PONI-file"
         return self._poni
 
     def _set_poni(self, value):
@@ -585,7 +630,7 @@ class Integrate2dResult(IntegrateResult):
         self._azimuthal_unit = unit
 
 
-class SeparateResult(tuple):
+class SeparateResult(_CopyableTuple):
     """
     Class containing the result of AzimuthalIntegrator.separte which separates the
 
@@ -593,6 +638,12 @@ class SeparateResult(tuple):
     * Bragg peaks (signal > amorphous)
     * Shadow areas (signal < amorphous)
     """
+    COPYABLE_ATTR = {'_radial', '_intensity', '_sigma',
+                    '_sum_signal', '_sum_variance', '_sum_normalization',
+                    '_count', '_unit', '_has_mask_applied', '_has_dark_correction',
+                    '_has_flat_correction', '_normalization_factor', '_polarization_factor',
+                    '_metadata', '_npt_rad', '_npt_azim', '_percentile', '_method',
+                    '_method_called', '_compute_engine', '_shadow'}
 
     def __new__(self, bragg, amorphous):
         return tuple.__new__(SeparateResult, (bragg, amorphous))
@@ -898,8 +949,17 @@ class SeparateResult(tuple):
         self._npt_azim = value
 
 
-class SparseFrame(tuple):
+class SparseFrame(_CopyableTuple):
     """Result of the sparsification of a diffraction frame"""
+    COPYABLE_ATTR = {'_shape', '_dtype', '_mask',
+                    '_radius', '_dummy', '_background_avg',
+                    '_background_std', '_unit', '_has_dark_correction',
+                    '_has_flat_correction', '_normalization_factor', '_polarization_factor',
+                    '_metadata', '_percentile', '_method',
+                    '_method_called', '_compute_engine',
+                    '_cutoff_clip', '_cutoff_pick', '_cutoff_peak',
+                    '_background_cycle', '_noise', '_radial_range', '_error_model',
+                    '_peaks', '_peak_patch_size', '_peak_connected'}
 
     def __new__(self, index, intensity):
         return tuple.__new__(SparseFrame, (index, intensity))
@@ -1036,6 +1096,7 @@ class SparseFrame(tuple):
     def unit(self):
         return self._unit
 
+
 def rebin1d(res2d):
     """Function that rebins an Integrate2dResult into a Integrate1dResult
 
@@ -1043,16 +1104,16 @@ def rebin1d(res2d):
     :return: Integrate1dResult
     """
     bins_rad = res2d.radial
-    sum_signal =  res2d.sum_signal.sum(axis=0)
-    sum_normalization =  res2d.sum_normalization.sum(axis=0)
+    sum_signal = res2d.sum_signal.sum(axis=0)
+    sum_normalization = res2d.sum_normalization.sum(axis=0)
     I = sum_signal / sum_normalization
     if res2d.sum_variance is not None:
-        sum_variance =  res2d.sum_variance.sum(axis=0)
+        sum_variance = res2d.sum_variance.sum(axis=0)
         sem = numpy.sqrt(sum_variance) / sum_normalization
         result = Integrate1dResult(bins_rad, I, sem)
         result._set_sum_normalization2(res2d.sum_normalization2.sum(axis=0))
         result._set_sum_variance(sum_variance)
-        result._set_std(numpy.sqrt(sum_variance) / sum_normalization  )
+        result._set_std(numpy.sqrt(sum_variance) / sum_normalization)
         result._set_std(sem)
     else:
         result = Integrate1dResult(bins_rad, I)
@@ -1074,3 +1135,160 @@ def rebin1d(res2d):
     result._set_normalization_factor(res2d.normalization_factor)
     result._set_metadata(res2d.metadata)
     return result
+
+class Integrate1dFiberResult(IntegrateResult):
+    def __new__(self, integrated, intensity, sigma=None):
+        if sigma is None:
+            t = integrated, intensity
+        else:
+            t = integrated, intensity, sigma
+        return IntegrateResult.__new__(Integrate1dFiberResult, t)
+
+    def __init__(self, integrated, intensity, sigma=None):
+        super(Integrate1dFiberResult, self).__init__()
+
+    @property
+    def integrated(self):
+        """
+        Integrated positions (q/2theta/r)
+
+        :rtype: numpy.ndarray
+        """
+        return self[0]
+
+    @property
+    def radial(self):
+        logger.warning("radial does not apply to a fiber/grazing-incidence result, use integrated instead")
+        return self[0]
+
+    @property
+    def intensity(self):
+        """
+        Regrouped intensity
+
+        :rtype: numpy.ndarray
+        """
+        return self[1]
+
+    @property
+    def sigma(self):
+        """
+        Error array if it was requested
+
+        :rtype: numpy.ndarray, None
+        """
+        if len(self) == 2:
+            return None
+        return self[2]
+
+class Integrate2dFiberResult(IntegrateResult):
+    """
+    Result of an 2D integration for fiber/grazing-incidence scattering.
+    Provide a tuple access as a simple way to reach main attributes.
+    Default result, extra results, and some integration parameters are available from attributes.
+    Analog to azimuthal integrate containers but: Radial -> in-plane, Azimuthal -> out-of-plane
+    """
+    def __new__(self, intensity, inplane, outofplane, sigma=None):
+        if sigma is None:
+            t = intensity, inplane, outofplane
+        else:
+            t = intensity, inplane, outofplane, sigma
+        return IntegrateResult.__new__(Integrate2dFiberResult, t)
+
+    def __init__(self, intensity, inplane, outofplane, sigma=None):
+        super(Integrate2dFiberResult, self).__init__()
+        self._oop_unit = None
+        self._ip_unit = None
+
+    @property
+    def intensity(self):
+        """
+        Regrouped intensity
+
+        :rtype: numpy.ndarray
+        """
+        return self[0]
+
+    @property
+    def inplane(self):
+        """
+        In-plane positions (q/2theta/r)
+
+        :rtype: numpy.ndarray
+        """
+        return self[1]
+
+    @property
+    def outofplane(self):
+        """
+        Out-of-plane positions (q/2theta/r)
+
+        :rtype: numpy.ndarray
+        """
+        return self[2]
+
+    @property
+    def sigma(self):
+        """
+        Error array if it was requested
+
+        :rtype: numpy.ndarray, None
+        """
+        if len(self) == 3:
+            return None
+        return self[3]
+
+    @property
+    def unit(self):
+        """
+        :rtype: 2-tuple of Unit
+        """
+        return self._ip_unit, self._oop_unit
+
+    @property
+    def radial(self):
+        logger.warning("Radial does not apply to a fiber/grazing-incidence result, use inplane instead")
+        return self.inplane
+
+    @property
+    def azimuthal(self):
+        logger.warning("Azimuthal does not apply to a fiber/grazing-incidence result, use outofplane instead")
+        return self.outofplane
+
+    @property
+    def ip_unit(self):
+        """In-plane scattering unit
+
+        :rtype: string
+        """
+        return self._ip_unit
+
+    def _set_ip_unit(self, unit):
+        """Define the in-plane scattering unit
+
+        :type unit: str
+        """
+        self._ip_unit = unit
+
+    def _set_radial_unit(self, unit):
+        logger.warning("Radial units does not apply to a fiber/grazing-incidence result, use ip_unit instead")
+        self._set_ip_unit(unit)
+
+    @property
+    def oop_unit(self):
+        """Out-of-plane scattering unit
+
+        :rtype: string
+        """
+        return self._oop_unit
+
+    def _set_oop_unit(self, unit):
+        """Define the out-of-plane scattering unit
+
+        :type unit: str
+        """
+        self._oop_unit = unit
+
+    def _set_azimuthal_unit(self, unit):
+        logger.warning("Azimuthal units does not apply to a fiber/grazing-incidence result, use oop_unit instead")
+        self._set_oop_unit(unit)

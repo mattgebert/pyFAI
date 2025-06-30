@@ -30,7 +30,7 @@ __author__ = "Jérôme Kieffer"
 __contact__ = "Jerome.Kieffer@ESRF.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "27/03/2025"
+__date__ = "16/06/2025"
 __status__ = "stable"
 __docformat__ = 'restructuredtext'
 
@@ -1185,8 +1185,7 @@ class AzimuthalIntegrator(Integrator):
                   method="splitpixel", unit=units.Q,
                   percentile=50, dummy=None, delta_dummy=None,
                   mask=None, normalization_factor=1.0, metadata=None):
-        """Perform the 2D integration and filter along each row using a median
-        filter
+        """Perform the 2D integration and filter along each row using a median filter
 
         :param data: input image as numpy array
         :param npt_rad: number of radial points
@@ -1338,18 +1337,15 @@ class AzimuthalIntegrator(Integrator):
                      metadata=None,
                      safe=True,
                      **kwargs):
-        """Performs iteratively the 1D integration with variance propagation
-        and performs a sigm-clipping at each iteration, i.e.
-        all pixel which intensity differs more than thres*std is
-        discarded for next iteration.
+        """Performs a median filter in azimuthal space:
 
-        Keep only pixels with intensty:
+        All pixels contributing to an azimuthal bin are sorted according to their corrected intensity (i.e. signal/norm).
+        Then a cumulative sum is performed on their weight which allows to determine the location of the different quantiles.
+        The percentile parameter (in the range [1:100]) can be:
+        - either a single scalar, then the pixel with the nearest value to the quantile is used (i.e. the default value 50 provides the median).
+        - either a 2-tuple, then the weighted average is calculated for all pixels between the two quantiles provided.
 
-            ``|I - <I>| < thres * σ(I)``
-
-        This enforces a symmetric, bell-shaped distibution (i.e. gaussian-like)
-        and is very good at extracting background or amorphous isotropic scattering
-        out of Bragg peaks.
+        Unlike sigma-clipping, this method is compatible with any kind of pixel splitting but much slower.
 
         :param data: input image as numpy array
         :param npt_rad: number of radial points
@@ -1592,7 +1588,13 @@ class AzimuthalIntegrator(Integrator):
                 intpl = integr.medfilt(data, **kwargs)
         else:
             raise RuntimeError(f"Method {method} is not yet implemented. Please report an issue on https://github.com/silx-kit/pyFAI/issues/new")
-        result = Integrate1dResult(intpl.position * unit.scale, intpl.intensity, intpl.sem)
+        if intpl.variance is not None:
+            if numpy.all(intpl.variance == numpy.zeros_like(intpl.variance)):
+                result = Integrate1dResult(intpl.position * unit.scale, intpl.intensity)
+            else:
+                result = Integrate1dResult(intpl.position * unit.scale, intpl.intensity, intpl.sem)
+        else:
+                result = Integrate1dResult(intpl.position * unit.scale, intpl.intensity)
         result._set_method_called("sigma_clip_ng")
         result._set_method(method)
         result._set_compute_engine(str(method))
