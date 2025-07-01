@@ -313,6 +313,25 @@ class Cell(object):
                 strk = "%.8e" % k
                 f.write("%.8f # %s %s%s" % (k, d[strk][-1], len(d[strk]) - 1, os.linesep))
 
+    def to_calibrant(self,
+                     name: Optional[str] = None,
+                     wavelength: Optional[float] = None,
+                     dmin: float = 1.0) -> Calibrant:
+        """
+        Creates a Calibrant object from the cell.
+        
+        :param wavelength: Wavelength in meters, if None, the wavelength is not set.
+        :param dmin: Minimum d-spacing to be considered in Angstroms. By default 1.0 Å.
+        """
+        d = self.d_spacing(dmin)
+        ds = [i[0] for i in d.values()]
+        ds.sort(reverse=True)
+        c = Calibrant(
+            filename=name,
+            dSpacing = ds, 
+            wavelength=wavelength
+        )
+        return c
 
 class Calibrant(object):
     """
@@ -466,6 +485,21 @@ class Calibrant(object):
         # self._dSpacing.sort(reverse=True)
         if self._wavelength:
             self._calc_2th()
+
+    @staticmethod
+    def from_cell(cell: Cell, name: Optional[str] = None,
+                  wavelength: Optional[float] = None,
+                  dmin: float = 1.0) -> Calibrant:
+        """
+        Create a calibrant from a cell, alternative constructor to `Cell.to_calibrant`.
+
+        :param cell: A Cell object
+        :param name: Name of the calibrant, if None, the name is taken from the cell.
+        :param wavelength: Wavelength in meters, if None, the wavelength is not set.
+        :param dmin: Minimum d-spacing to be considered in Angstroms. By default 1.0 Å.
+        """
+        c = cell.to_calibrant(name=name, wavelength=wavelength, dmin=dmin)
+        return c
 
     def _initialize(self):
         """Initialize the object if expected."""
